@@ -1840,6 +1840,7 @@ static int execute_p2ptest(struct sec_ts_data *ts)
 				ts->cm_raw_key_p2p_diff = (tBuff[7] & 0xC0) << 2 | (tBuff[6] & 0xFF);
 			} else if (tBuff[1] == SEC_TS_VENDOR_ACK_RX_NODE_GAP_TEST_DONE) {
 				ts->cm_raw_set_p2p_gap_y = (tBuff[2] & 0xFF) << 8 | (tBuff[3] & 0xFF);
+				ts->cm_raw_set_p2p_gap_y_result = (tBuff[4] & 0x01);
 			}
 		}
 

@@ -38,6 +38,7 @@
 #define SM5714_REG_INT_STATUS1_ATTACH			(1<<3)
 #define SM5714_REG_INT_STATUS1_DETACH			(1<<4)
 #define SM5714_REG_INT_STATUS1_WAKEUP			(1<<5)
+#define SM5714_REG_INT_STATUS1_ABNORMAL_DEV		(1<<7)
 
 #define SM5714_REG_INT_STATUS2_PD_RID_DETECT	(1<<0)
 #define SM5714_REG_INT_STATUS2_VCONN_DISCHG		(1<<2)
@@ -72,7 +73,8 @@
 #define ENABLED_INT_1	(SM5714_REG_INT_STATUS1_VBUSPOK |\
 			SM5714_REG_INT_STATUS1_TMR_EXP |\
 			SM5714_REG_INT_STATUS1_ATTACH |\
-			SM5714_REG_INT_STATUS1_DETACH)
+			SM5714_REG_INT_STATUS1_DETACH |\
+			SM5714_REG_INT_STATUS1_ABNORMAL_DEV)
 #define ENABLED_INT_2	(SM5714_REG_INT_STATUS2_PD_RID_DETECT |\
 			SM5714_REG_INT_STATUS2_VCONN_DISCHG|\
 			SM5714_REG_INT_STATUS2_SRC_ADV_CHG|\
@@ -94,9 +96,11 @@
 			SM5714_REG_INT_STATUS5_SBU2_OVP |\
 			SM5714_REG_INT_STATUS5_CC_ABNORMAL)
 
-#define SM5714_ATTACH_SOURCE			0x01
+#define SM5714_ATTACH_SOURCE				0x01
 #define SM5714_ATTACH_SINK				(0x01 << SM5714_ATTACH_SOURCE)
 #define SM5714_ATTACH_AUDIO				0x03
+#define SM5714_ATTACH_UN_ORI_DEBUG_SOURCE		(0x01 << SM5714_ATTACH_SINK)
+#define SM5714_ATTACH_ORI_DEBUG_SOURCE			0x05
 #define SM5714_ATTACH_AUDIO_CHARGE		(0x01 << 2)
 #define SM5714_ATTACH_TYPE				0x07
 #define SM5714_ADV_CURR					0x18
@@ -184,8 +188,8 @@ enum sm5714_usbpd_reg {
 	SM5714_REG_CC_CNTL6			= 0x2E,
 	SM5714_REG_CC_CNTL7			= 0x2F,
 	SM5714_REG_CABLE_POL_SEL	= 0x33,
-	SM5714_REG_GEN_TMR_U		= 0x35,
-	SM5714_REG_GEN_TMR_L		= 0x36,
+	SM5714_REG_GEN_TMR_L		= 0x35,
+	SM5714_REG_GEN_TMR_U		= 0x36,
 	SM5714_REG_PD_CNTL1			= 0x38,
 	SM5714_REG_PD_CNTL2			= 0x39,
 	SM5714_REG_PD_CNTL4			= 0x3B,
@@ -288,11 +292,13 @@ struct sm5714_phydrv_data {
 	bool is_jig_case_on;
 	bool is_mpsm_exit;
 	bool suspended;
+	bool is_timer_expired;
 	int check_msg_pass;
 	int rid;
 	int is_attached;
 	int reset_done;
 	int pd_support;
+	int abnormal_dev_cnt;
 	struct delayed_work role_swap_work;
 	struct delayed_work usb_external_notifier_register_work;
 	struct notifier_block usb_external_notifier_nb;

@@ -482,6 +482,8 @@ enum ss_dsi_cmd_set_type {
 	TX_IRC_SUBDIVISION,
 	TX_PAC_IRC_SUBDIVISION,
 	TX_IRC_OFF,
+	TX_SMOOTH_DIMMING_ON,
+	TX_SMOOTH_DIMMING_OFF,
 
 	TX_NORMAL_BRIGHTNESS_ETC,
 
@@ -847,6 +849,10 @@ struct samsung_display_debug_data {
 	bool print_cmds;
 	bool *is_factory_mode;
 	bool panic_on_pptimeout;
+
+	/* misc */
+	struct miscdevice dev;
+	bool report_once;
 };
 
 struct self_display {
@@ -1301,6 +1307,7 @@ void EA8076GA_AMS638VL01_FHD_init(struct samsung_display_driver_data *vdd);
 void S6E3FC3_AMS667YM01_FHD_init(struct samsung_display_driver_data *vdd);
 void S6E3FC3_AMS646YD04_FHD_init(struct samsung_display_driver_data *vdd);
 void S6E3FC3_AMS638YQ01_FHD_init(struct samsung_display_driver_data *vdd);
+void HX83102_TV104WUM_WUXGA_init(struct samsung_display_driver_data *vdd);
 
 struct panel_func {
 	/* ON/OFF */
@@ -1856,7 +1863,7 @@ struct vrr_info {
 	int prev_refresh_rate;
 	bool prev_sot_hs_mode;
 	bool prev_phs_mode;
-	
+
 	/* Some displays, like hubble HAB and c2 HAC, cannot support 120hz in WQHD.
 	 * In this case, it should guarantee below sequence to prevent WQHD@120hz mode,
 	 * in case of WQHD@60hz -> FHD/HD@120hz.
@@ -2023,6 +2030,9 @@ struct samsung_display_driver_data {
 	/* Sleep_out cmd time check */
 	ktime_t sleep_out_time;
 	ktime_t tx_set_on_time;
+
+	/* Some panel read operation should be called after on-command. */
+	bool skip_read_on_pre;
 
 	/* Support Global Para */
 	bool gpara;

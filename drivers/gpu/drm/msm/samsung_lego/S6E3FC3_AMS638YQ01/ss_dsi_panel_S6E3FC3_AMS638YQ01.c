@@ -75,6 +75,54 @@ static int samsung_panel_on_pre(struct samsung_display_driver_data *vdd)
 
 static int samsung_panel_on_post(struct samsung_display_driver_data *vdd)
 {
+	/* Module info */
+	if (!vdd->module_info_loaded_dsi) {
+		if (IS_ERR_OR_NULL(vdd->panel_func.samsung_module_info_read))
+			LCD_ERR("no samsung_module_info_read function\n");
+		else
+			vdd->module_info_loaded_dsi = vdd->panel_func.samsung_module_info_read(vdd);
+	}
+
+	/* Manufacture date */
+	if (!vdd->manufacture_date_loaded_dsi) {
+		if (IS_ERR_OR_NULL(vdd->panel_func.samsung_manufacture_date_read))
+			LCD_ERR("no samsung_manufacture_date_read function\n");
+		else
+			vdd->manufacture_date_loaded_dsi = vdd->panel_func.samsung_manufacture_date_read(vdd);
+	}
+
+	/* DDI ID */
+	if (!vdd->ddi_id_loaded_dsi) {
+		if (IS_ERR_OR_NULL(vdd->panel_func.samsung_ddi_id_read))
+			LCD_ERR("no samsung_ddi_id_read function\n");
+		else
+			vdd->ddi_id_loaded_dsi = vdd->panel_func.samsung_ddi_id_read(vdd);
+	}
+
+	/* MDNIE X,Y (1.Manufacture Date -> 2.MDNIE X,Y -> 3.Cell ID -> 4.OCTA ID) */
+	if (!vdd->mdnie_loaded_dsi) {
+		if (IS_ERR_OR_NULL(vdd->panel_func.samsung_mdnie_read))
+			LCD_ERR("no samsung_mdnie_read function\n");
+		else
+			vdd->mdnie_loaded_dsi = vdd->panel_func.samsung_mdnie_read(vdd);
+	}
+
+	/* Panel Unique Cell ID (1.Manufacture Date -> 2.MDNIE X,Y -> 3.Cell ID -> 4.OCTA ID) */
+	if (!vdd->cell_id_loaded_dsi) {
+		if (IS_ERR_OR_NULL(vdd->panel_func.samsung_cell_id_read))
+			LCD_ERR("no samsung_cell_id_read function\n");
+		else
+			vdd->cell_id_loaded_dsi = vdd->panel_func.samsung_cell_id_read(vdd);
+	}
+
+	/* Panel Unique OCTA ID (1.Manufacture Date -> 2.MDNIE X,Y -> 3.Cell ID -> 4.OCTA ID) */
+	if (!vdd->octa_id_loaded_dsi) {
+		if (IS_ERR_OR_NULL(vdd->panel_func.samsung_octa_id_read))
+			LCD_ERR("no samsung_octa_id_read function\n");
+		else
+			vdd->octa_id_loaded_dsi = vdd->panel_func.samsung_octa_id_read(vdd);
+	}
+
 	if (!vdd->samsung_splash_enabled) {
 		if (vdd->self_disp.self_mask_img_write)
 			vdd->self_disp.self_mask_img_write(vdd);
@@ -181,57 +229,17 @@ static struct dsi_panel_cmd_set *ss_brightness_gamma_mode2_normal
 
 	pcmds = ss_get_cmds(vdd, TX_GAMMA_MODE2_NORMAL);
 
-	if (ss_panel_revision(vdd) >= 'C') {
-		/*
-			This cmd sustain 0x20 value before brightness change.
-			This is display lab request point.
-		*/
-		pcmds->cmds[1].ss_txbuf[1] = vdd->finger_mask_updated ? 0x20 : 0x60;
+	/* WRDISBV(51h) */
+	pcmds->cmds[3].ss_txbuf[1] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 8, 8);
+	pcmds->cmds[3].ss_txbuf[2] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 0, 8);
 
-		/* Smooth transition : 0x28 */
-		pcmds->cmds[4].ss_txbuf[1] = vdd->finger_mask_updated ? 0x20 : 0x28;
-
-		pcmds->cmds[5].ss_txbuf[1] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 8, 8);
-		pcmds->cmds[5].ss_txbuf[2] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 0, 8);
-
-		pcmds->cmds[6].ss_txbuf[1] = vdd->br_info.temperature > 0 ?
+	/* Temperature ELVSS(B5h) */
+	pcmds->cmds[4].ss_txbuf[1] = vdd->br_info.temperature > 0 ?
 				vdd->br_info.temperature : (char)(BIT(7) | (-1 * vdd->br_info.temperature));
-
-		if (vdd->finger_mask_updated) {
-			/*
-				There is panel limitation for HBM & AOR setting.
-				TE ->hbm cmd excluded aor cmd -> delay(90 fps 3ms or 60 fps 9ms) ->
-				aor cmd -> mask image
-			*/
-			pcmds->cmds[6].last_command = 1;
-
-			if (vdd->vrr.cur_refresh_rate > 60)
-				pcmds->cmds[6].post_wait_ms = HBM_NORMAL_DELAY_90FPS;
-			else
-				pcmds->cmds[6].post_wait_ms = HBM_NORMAL_DELAY_60FPS;
-		} else {
-			pcmds->cmds[6].last_command = 0;
-			pcmds->cmds[6].post_wait_ms = 0;
-		}
-
-		/* AOR */
-		pcmds->cmds[10].ss_txbuf[1] = normal_aor_manual[cd_index].aor_63h_119;
-		pcmds->cmds[10].ss_txbuf[2] = normal_aor_manual[cd_index].aor_63h_120;
-		pcmds->cmds[10].ss_txbuf[3] = normal_aor_manual[cd_index].aor_63h_121;
-	} else {
-		/* Smooth transition : 0x28 */
-		pcmds->cmds[2].ss_txbuf[1] = vdd->finger_mask_updated ? 0x20 : 0x28;
-
-		pcmds->cmds[3].ss_txbuf[1] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 8, 8);
-		pcmds->cmds[3].ss_txbuf[2] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 0, 8);
-
-		pcmds->cmds[4].ss_txbuf[1] = vdd->br_info.temperature > 0 ?
-				vdd->br_info.temperature : (char)(BIT(7) | (-1 * vdd->br_info.temperature));
-		/* AOR */
-		pcmds->cmds[6].ss_txbuf[1] = normal_aor_manual[cd_index].aor_63h_119;
-		pcmds->cmds[6].ss_txbuf[2] = normal_aor_manual[cd_index].aor_63h_120;
-		pcmds->cmds[6].ss_txbuf[3] = normal_aor_manual[cd_index].aor_63h_121;
-	}
+	/* Manual AOR(63h) */
+	pcmds->cmds[6].ss_txbuf[1] = normal_aor_manual[cd_index].aor_63h_119;
+	pcmds->cmds[6].ss_txbuf[2] = normal_aor_manual[cd_index].aor_63h_120;
+	pcmds->cmds[6].ss_txbuf[3] = normal_aor_manual[cd_index].aor_63h_121;
 
 	*level_key = LEVEL_KEY_NONE;
 
@@ -257,45 +265,18 @@ static struct dsi_panel_cmd_set *ss_brightness_gamma_mode2_hbm
 
 	pcmds = ss_get_cmds(vdd, TX_GAMMA_MODE2_HBM);
 
-	if (ss_panel_revision(vdd) >= 'C') {
-		pcmds->cmds[5].ss_txbuf[1] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 8, 8);
-		pcmds->cmds[5].ss_txbuf[2] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 0, 8);
+	/* WRDISBV(51h) */
+	pcmds->cmds[3].ss_txbuf[1] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 8, 8);
+	pcmds->cmds[3].ss_txbuf[2] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 0, 8);
 
-		pcmds->cmds[6].ss_txbuf[1] = vdd->br_info.temperature > 0 ?
-				vdd->br_info.temperature : (char)(BIT(7) | (-1 * vdd->br_info.temperature));
+	/* Temperature ELVSS(B5h) */
+	pcmds->cmds[4].ss_txbuf[1] = vdd->br_info.temperature > 0 ?
+			vdd->br_info.temperature : (char)(BIT(7) | (-1 * vdd->br_info.temperature));
 
-		if (vdd->finger_mask_updated) {
-			/*
-				There is panel limitation for HBM & AOR setting.
-				TE ->hbm cmd excluded aor cmd -> delay(90 fps 3ms or 60 fps 9ms) ->
-				aor cmd -> mask image
-			*/
-			pcmds->cmds[6].last_command = 1;
-
-			if (vdd->vrr.cur_refresh_rate > 60)
-				pcmds->cmds[6].post_wait_ms = HBM_NORMAL_DELAY_90FPS;
-			else
-				pcmds->cmds[6].post_wait_ms = HBM_NORMAL_DELAY_60FPS;
-		} else {
-			pcmds->cmds[6].last_command = 0;
-			pcmds->cmds[6].post_wait_ms = 0;
-		}
-
-		pcmds->cmds[10].ss_txbuf[1] = hbm_aor_manual[cd_index].aor_63h_119;
-		pcmds->cmds[10].ss_txbuf[2] = hbm_aor_manual[cd_index].aor_63h_120;
-		pcmds->cmds[10].ss_txbuf[3] = hbm_aor_manual[cd_index].aor_63h_121;
-
-	} else {
-		pcmds->cmds[3].ss_txbuf[1] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 8, 8);
-		pcmds->cmds[3].ss_txbuf[2] = get_bit(vdd->br_info.common_br.gm2_wrdisbv, 0, 8);
-
-		pcmds->cmds[4].ss_txbuf[1] = vdd->br_info.temperature > 0 ?
-				vdd->br_info.temperature : (char)(BIT(7) | (-1 * vdd->br_info.temperature));
-		/* AOR */
-		pcmds->cmds[6].ss_txbuf[1] = hbm_aor_manual[cd_index].aor_63h_119;
-		pcmds->cmds[6].ss_txbuf[2] = hbm_aor_manual[cd_index].aor_63h_120;
-		pcmds->cmds[6].ss_txbuf[3] = hbm_aor_manual[cd_index].aor_63h_121;
-	}
+	/* Manual AOR(63h) */
+	pcmds->cmds[6].ss_txbuf[1] = hbm_aor_manual[cd_index].aor_63h_119;
+	pcmds->cmds[6].ss_txbuf[2] = hbm_aor_manual[cd_index].aor_63h_120;
+	pcmds->cmds[6].ss_txbuf[3] = hbm_aor_manual[cd_index].aor_63h_121;
 
 	*level_key = LEVEL_KEY_NONE;
 
@@ -394,7 +375,7 @@ static int ss_elvss_read(struct samsung_display_driver_data *vdd)
 
 static int ss_module_info_read(struct samsung_display_driver_data *vdd)
 {
-	unsigned char buf[11];
+	unsigned char buf[11] = {0,};
 	int year, month, day;
 	int hour, min;
 	int mdnie_tune_index = 0;

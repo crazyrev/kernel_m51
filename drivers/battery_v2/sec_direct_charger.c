@@ -102,11 +102,6 @@ static bool sec_direct_chg_set_switching_charge(
 {
 	union power_supply_propval value = {0,};
 
-	if (charger->charger_mode_main == charger_mode && !(charger->dc_retry_cnt)) {
-		pr_info("%s: charger_mode is same(%s)\n", __func__,
-			sec_direct_charger_mode_str[charger->charger_mode_main]);
-		return false;
-	}
 
 	pr_info("%s: charger_mode(%s->%s)\n", __func__,
 		sec_direct_charger_mode_str[charger->charger_mode_main],

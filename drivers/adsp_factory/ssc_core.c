@@ -429,6 +429,20 @@ static ssize_t sensor_dump_show(struct device *dev,
 	return snprintf(buf, PAGE_SIZE, "%s\n", SENSOR_DUMP_DONE);
 }
 
+
+static ssize_t ar_mode_store(struct device *dev,
+	struct device_attribute *attr, const char *buf, size_t size)
+{
+	int32_t msg_buf[2] = {OPTION_TYPE_SSC_AUTO_ROTATION_MODE, 0};
+
+	msg_buf[1] = buf[0] - 48;
+	pr_info("[FACTORY]%s: ar_mode:%d\n", __func__, msg_buf[1]);
+	adsp_unicast(msg_buf, sizeof(msg_buf),
+		MSG_SSC_CORE, 0, MSG_TYPE_OPTION_DEFINE);
+
+	return size;
+}
+
 static DEVICE_ATTR(dumpstate, 0440, dumpstate_show, NULL);
 static DEVICE_ATTR(operation_mode, 0664,
 	operation_mode_show, operation_mode_store);
@@ -442,6 +456,7 @@ static DEVICE_ATTR(ssr_reset, 0440, ssr_reset_show, NULL);
 static DEVICE_ATTR(ssc_mode, 0664, ssc_mode_show, ssc_mode_store);
 #endif
 static DEVICE_ATTR(sensor_dump, 0444, sensor_dump_show, NULL);
+static DEVICE_ATTR(ar_mode, 0220, NULL, ar_mode_store);
 
 static struct device_attribute *core_attrs[] = {
 	&dev_attr_dumpstate,
@@ -456,6 +471,7 @@ static struct device_attribute *core_attrs[] = {
 #ifdef CONFIG_SUPPORT_SSC_MODE
 	&dev_attr_ssc_mode,
 #endif
+	&dev_attr_ar_mode,
 	NULL,
 };
 

@@ -443,6 +443,40 @@ void sm5714_short_state_check(void *_data)
 #endif
 	}
 }
+#if !defined(CONFIG_SEC_FACTORY) && defined(CONFIG_SM5714_WATER_DETECTION_ENABLE)
+static int sm5714_saline_water_check(void *data)
+{
+	struct sm5714_phydrv_data *pdic_data = data;
+	struct i2c_client *i2c = pdic_data->i2c;
+	u8 cc_status = 0, adc_sbu1 = 0, adc_sbu2 = 0;
+	int ret = 0;
+
+	sm5714_usbpd_read_reg(i2c, SM5714_REG_CC_STATUS, &cc_status);
+
+	if (((cc_status & SM5714_ATTACH_TYPE) == SM5714_ATTACH_SOURCE) ||
+			((cc_status & SM5714_ATTACH_TYPE) == SM5714_ATTACH_UN_ORI_DEBUG_SOURCE) ||
+			((cc_status & SM5714_ATTACH_TYPE) == SM5714_ATTACH_ORI_DEBUG_SOURCE))
+		goto out;
+
+	pr_info("%s, cc_status : 0x%x\n", __func__, cc_status);
+	sm5714_corr_sbu_volt_read(pdic_data, &adc_sbu1, &adc_sbu2,
+			SBU_SOURCING_OFF);
+
+	if ((adc_sbu1 >= 0x4) && (adc_sbu2 >= 0x4)) {
+		sm5714_usbpd_write_reg(i2c, SM5714_REG_CC_CNTL3, 0x00);
+
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x02);
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x00);
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x02);
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x00);
+
+		sm5714_usbpd_write_reg(i2c, SM5714_REG_CC_CNTL3, 0x80);
+		ret = 1;
+	}
+out:
+	return ret;
+}
+#endif
 #endif
 
 static void sm5714_check_cc_state(struct sm5714_phydrv_data *pdic_data)
@@ -1713,6 +1747,20 @@ void sm5714_cc_state_hold_on_off(void *_data, int onoff)
 	pr_info("%s: CC State Hold [%d], val = %x\n", __func__, onoff, val);
 }
 
+static void sm5714_abnormal_dev_int_on_off(struct sm5714_phydrv_data *pdic_data, int onoff)
+{
+	struct i2c_client *i2c = pdic_data->i2c;
+	u8 val;
+
+	sm5714_usbpd_read_reg(i2c, 0xEE, &val);
+	if (onoff == 1)
+		val |= 0x2;
+	else
+		val &= 0xFD;
+	sm5714_usbpd_write_reg(i2c, 0xEE, val);
+	pr_info("%s: ABNORMAL_DEV INT [%d], val = 0x%x\n", __func__, onoff, val);
+}
+
 bool sm5714_get_rx_buf_st(void *_data)
 {
 	struct sm5714_usbpd_data *pd_data = (struct sm5714_usbpd_data *) _data;
@@ -1814,6 +1862,62 @@ static void sm5714_usbpd_abnormal_reset_check(struct sm5714_phydrv_data *pdic_da
 	}
 }
 
+#if defined(CONFIG_SM5714_WATER_DETECTION_ENABLE)
+static void sm5714_usbpd_check_normal_otg_device(struct sm5714_phydrv_data *pdic_data)
+{
+	struct i2c_client *i2c = pdic_data->i2c;
+	u8 cc1_80ua, cc2_80ua, cc1_fe, cc2_fe, reg_data;
+	bool abnormal_st = false;
+	int reTry = 0;
+
+	if (pdic_data->abnormal_dev_cnt < 2)
+		return;
+	else if (pdic_data->abnormal_dev_cnt > 2) {
+		sm5714_abnormal_dev_int_on_off(pdic_data, 0);
+		/* Timer set 1s */
+		sm5714_usbpd_write_reg(i2c, SM5714_REG_GEN_TMR_L, 0x10);
+		sm5714_usbpd_write_reg(i2c, SM5714_REG_GEN_TMR_U, 0x27);
+		pdic_data->is_timer_expired = true;
+		return;
+	}
+
+	sm5714_usbpd_write_reg(i2c, 0xFE, 0x02);
+
+	sm5714_usbpd_read_reg(i2c, 0x18, &cc1_80ua);
+	sm5714_usbpd_read_reg(i2c, 0x19, &cc2_80ua);
+	sm5714_usbpd_read_reg(i2c, 0x1F, &cc1_fe);
+	sm5714_usbpd_read_reg(i2c, 0x21, &cc2_fe);
+
+	sm5714_usbpd_write_reg(i2c, 0xFE, 0x00);
+
+	sm5714_usbpd_read_reg(i2c, 0xFE, &reg_data);
+	for (reTry = 0; reTry < 5; reTry++) {
+		if (reg_data != 0x00) {
+			usleep_range(1000, 1100);
+			pr_info("%s, 0xFE : 0x%x, retry = %d\n", __func__, reg_data, reTry+1);
+			sm5714_usbpd_write_reg(i2c, 0xFE, 0x00);
+			sm5714_usbpd_read_reg(i2c, 0xFE, &reg_data);
+		} else
+			break;
+	}
+	if (reg_data != 0x00)
+		panic("sm5714 usbpd i2c error!!");
+	if ((cc1_80ua >= 0xC) && (cc1_80ua <= 0x16) && (cc1_fe < 0x4))
+		abnormal_st = true;
+	else if ((cc2_80ua >= 0xC) && (cc2_80ua <= 0x16) && (cc2_fe < 0x4))
+		abnormal_st = true;
+
+	if (abnormal_st) {
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x04);
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x00);
+		pdic_data->abnormal_dev_cnt = 0;
+	}
+
+	pr_info("%s, ABNOR_ST : %d, CC1_80uA[0x%x] CC2_80uA[0x%x] CC1_FE[0x%x] CC2_FE[0x%x]\n",
+			__func__, abnormal_st, cc1_80ua, cc2_80ua, cc1_fe, cc2_fe);
+}
+#endif
+
 static void sm5714_assert_rd(void *_data)
 {
 	struct sm5714_usbpd_data *data = (struct sm5714_usbpd_data *) _data;
@@ -1895,7 +1999,20 @@ static bool sm5714_poll_status(void *_data, int irq)
 		pdic_data->status_reg |= MSG_NONE;
 		goto out;
 	}
-
+#if defined(CONFIG_SM5714_WATER_DETECTION_ENABLE)
+	if (intr[0] & SM5714_REG_INT_STATUS1_TMR_EXP) {
+		if (pdic_data->is_timer_expired) {
+			pdic_data->is_timer_expired = false;
+			if (pdic_data->abnormal_dev_cnt != 0)
+				pdic_data->abnormal_dev_cnt = 0;
+			sm5714_abnormal_dev_int_on_off(pdic_data, 1);
+		}
+	}
+	if (intr[0]	& SM5714_REG_INT_STATUS1_ABNORMAL_DEV) {
+		pdic_data->abnormal_dev_cnt++;
+		sm5714_usbpd_check_normal_otg_device(pdic_data);
+	}
+#endif
 	if ((intr[4] & SM5714_REG_INT_STATUS5_CC_ABNORMAL) &&
 			(status[4] & SM5714_REG_INT_STATUS5_CC_ABNORMAL)) {
 		pdic_data->is_cc_abnormal_state = true;
@@ -2602,6 +2719,7 @@ static int sm5714_usbpd_notify_attach(void *data)
 	if (ret < 0)
 		dev_err(dev, "%s, i2c read CC_STATUS error\n", __func__);
 	pdic_data->is_attached = 1;
+	pdic_data->abnormal_dev_cnt = 0;
 	/* cc_SINK */
 	if ((reg_data & SM5714_ATTACH_TYPE) == SM5714_ATTACH_SOURCE) {
 		dev_info(dev, "ccstat : cc_SINK\n");
@@ -2951,6 +3069,11 @@ static irqreturn_t sm5714_pdic_irq_thread(int irq, void *data)
 	}
 
 	if (sm5714_get_status(pd_data, PLUG_ATTACH)) {
+#if !defined(CONFIG_SEC_FACTORY) && defined(CONFIG_SM5714_WATER_DETECTION_ENABLE)
+		if (!lpcharge &&
+				sm5714_saline_water_check(pdic_data))
+			goto out;
+#endif
 		pr_info("%s PLUG_ATTACHED +++\n", __func__);
 		rid_status = sm5714_get_status(pd_data, MSG_RID);
 		ret = sm5714_usbpd_notify_attach(pdic_data);
@@ -3010,7 +3133,6 @@ out:
 static int sm5714_usbpd_reg_init(struct sm5714_phydrv_data *_data)
 {
 	struct i2c_client *i2c = _data->i2c;
-
 	pr_info("%s", __func__);
 	if (!lpcharge)	/* Release SNK Only */
 		sm5714_usbpd_write_reg(i2c, SM5714_REG_CC_CNTL1, 0x41);
@@ -3018,6 +3140,7 @@ static int sm5714_usbpd_reg_init(struct sm5714_phydrv_data *_data)
 	/* Release SBU Sourcing */
 	sm5714_usbpd_write_reg(i2c, SM5714_REG_CORR_CNTL5, 0x00);
 #if defined(CONFIG_SM5714_WATER_DETECTION_ENABLE)
+	sm5714_abnormal_dev_int_on_off(_data, 1);
 	sm5714_usbpd_write_reg(i2c, SM5714_REG_CORR_CNTL4, 0x03);
 	/* Enable Rp Attach even under Water Status */
 	sm5714_usbpd_write_reg(i2c, SM5714_REG_CORR_OPT4, 0x7B);
@@ -3088,6 +3211,11 @@ static void sm5714_power_off_water_check(struct sm5714_phydrv_data *_data)
 	if (adc_sbu1 > 0xA && adc_sbu2 > 0xA) {
 		_data->is_water_detect = true;
 		sm5714_process_cc_water_det(_data, WATER_MODE_ON);
+		/* Enter water state */
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x02);
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x00);
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x02);
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x00);
 		pr_info("%s, TA with water.\n", __func__);
 		return;
 	} else if (adc_sbu1 > 0x3E || adc_sbu2 > 0x3E) {
@@ -3098,6 +3226,11 @@ static void sm5714_power_off_water_check(struct sm5714_phydrv_data *_data)
 		}
 		_data->is_water_detect = true;
 		sm5714_process_cc_water_det(_data, WATER_MODE_ON);
+		/* Enter water state */
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x02);
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x00);
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x02);
+		sm5714_usbpd_write_reg(i2c, 0x93, 0x00);
 		pr_info("%s, TA with water.\n", __func__);
 		return;
 	}
@@ -3330,7 +3463,9 @@ static int sm5714_usbpd_probe(struct i2c_client *i2c,
 	pdic_data->detach_valid = true;
 	pdic_data->is_otg_vboost = false;
 	pdic_data->is_jig_case_on = false;
+	pdic_data->is_timer_expired = false;
 	pdic_data->reset_done = 0;
+	pdic_data->abnormal_dev_cnt = 0;
 	pdic_data->is_cc_abnormal_state = false;
 #if defined(CONFIG_SM5714_SUPPORT_SBU)
 	pdic_data->is_sbu_abnormal_state = false;
@@ -3505,6 +3640,12 @@ static int sm5714_usbpd_suspend(struct device *dev)
 		enable_irq_wake(pdic_data->i2c->irq);
 
 	disable_irq(pdic_data->i2c->irq);
+	if (pdic_data->is_timer_expired) {
+		pdic_data->abnormal_dev_cnt = 0;
+		sm5714_usbpd_write_reg(pdic_data->i2c, SM5714_REG_GEN_TMR_L, 0x00);
+		sm5714_usbpd_write_reg(pdic_data->i2c, SM5714_REG_GEN_TMR_U, 0x00);
+	}
+
 	cancel_delayed_work_sync(&pdic_data->debug_work);
 
 	return 0;
@@ -3521,6 +3662,10 @@ static int sm5714_usbpd_resume(struct device *dev)
 		disable_irq_wake(pdic_data->i2c->irq);
 
 	enable_irq(pdic_data->i2c->irq);
+	if (pdic_data->is_timer_expired) {
+		sm5714_abnormal_dev_int_on_off(pdic_data, 1);
+		pdic_data->is_timer_expired = false;
+	}
 	schedule_delayed_work(&pdic_data->debug_work, msecs_to_jiffies(1500));
 
 	return 0;
